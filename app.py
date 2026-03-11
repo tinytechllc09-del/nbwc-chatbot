@@ -2,12 +2,19 @@ from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 import anthropic
 import os
+import time
+from collections import defaultdict
 from dotenv import load_dotenv
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
+
+# Rate limiting: 20 messages per IP per hour
+rate_limit = defaultdict(list)
+RATE_LIMIT_MAX = 20
+RATE_LIMIT_WINDOW = 3600
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
@@ -70,6 +77,13 @@ def embed():
 
 @app.route("/chat", methods=["POST"])
 def chat():
+    ip = request.remote_addr
+    now = time.time()
+    rate_limit[ip] = [t for t in rate_limit[ip] if now - t < RATE_LIMIT_WINDOW]
+    if len(rate_limit[ip]) >= RATE_LIMIT_MAX:
+        return jsonify({"reply": "You have reached the message limit. Please try again in an hour."}), 429
+    rate_limit[ip].append(now)
+
     user_message = request.json.get("message", "")
 
     message = client.messages.create(
